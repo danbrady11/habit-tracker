@@ -493,6 +493,13 @@ export default function App() {
     await saveData(updated);
   }
 
+  async function handleDeleteEntry(dateStr) {
+    const { [dateStr]: _, ...remaining } = data.entries;
+    const updated = { ...data, entries: remaining };
+    setData(updated);
+    await saveData(updated);
+  }
+
   if (!loaded) return (
     <div style={{ minHeight:"100vh", background:"#f8f6f2", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"Georgia,serif", color:"#aaa", fontSize:14 }}>
       Loading...
@@ -681,15 +688,24 @@ export default function App() {
                 const { score, breakdown } = calcDailyScore(e, 0);
                 const wp = data.weeklyPenalties?.[date];
                 return (
-                  <div key={date} style={{ ...card, marginBottom:8, cursor:"pointer" }} onClick={() => setEditDate(date)}>
+                  <div key={date} style={{ ...card, marginBottom:8 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                      <div>
+                      <div onClick={() => setEditDate(date)} style={{ flex:1, cursor:"pointer" }}>
                         <div style={{ fontSize:13 }}>{fmtDate(date)}</div>
                         <div style={{ fontSize:10, color:e.sober?"#2d6a4f":"#c1121f", marginTop:2 }}>{e.sober?"✓ Sober":`✗ ${e.drinks} drinks`}</div>
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                         <span style={{ fontSize:24, color:score>=0?"#2d6a4f":"#c1121f" }}>{score>0?"+":""}{score}</span>
-                        <span style={{ fontSize:11, color:"#ccc" }}>✏️</span>
+                        <span onClick={() => setEditDate(date)} style={{ fontSize:11, color:"#ccc", cursor:"pointer" }}>✏️</span>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (window.confirm(`Delete entry for ${fmtDate(date)}?`)) handleDeleteEntry(date);
+                          }}
+                          style={{ background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#ddd", padding:"2px 4px", lineHeight:1 }}
+                          title="Delete entry">
+                          🗑️
+                        </button>
                       </div>
                     </div>
                     {breakdown.map((b,i) => (
