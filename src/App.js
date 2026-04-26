@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
+// ── Constants ────────────────────────────────────────────────────────────────
 const USER_ID   = "dan";
 const AZ_OFFSET = -7;
 
@@ -13,6 +14,7 @@ const GRINDSTONE_TYPES = [
   { id: "optional2",    label: "Optional Two", points: 50  },
 ];
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function getAZDate(date = new Date()) {
   const utc = date.getTime() + date.getTimezoneOffset() * 60000;
   const az  = new Date(utc + AZ_OFFSET * 3600000);
@@ -47,6 +49,13 @@ function fmtShort(str) {
   return new Date(str + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split("T")[0];
+}
+
+// ── Scoring ──────────────────────────────────────────────────────────────────
 function calcDailyScore(entry, drinkStreak) {
   if (!entry) return { score: 0, breakdown: [] };
   let score = 0;
@@ -64,14 +73,14 @@ function calcDailyScore(entry, drinkStreak) {
     breakdown.push({ label: `Drinking (${drinks} drinks, day ${drinkStreak + 1} consecutive)`, pts: penalty });
   }
 
-  if (entry.breakfast === true)  { score += 25;  breakdown.push({ label: "Breakfast on plan",   pts: 25  }); }
-  if (entry.breakfast === false) { score -= 25;  breakdown.push({ label: "Breakfast missed",    pts: -25 }); }
-  if (entry.lunch === true)      { score += 25;  breakdown.push({ label: "Lunch on plan",       pts: 25  }); }
-  if (entry.lunch === false)     { score -= 25;  breakdown.push({ label: "Lunch missed",        pts: -25 }); }
-  if (entry.snacks === true)     { score += 25;  breakdown.push({ label: "Snacks on plan",      pts: 25  }); }
-  if (entry.snacks === false)    { score -= 25;  breakdown.push({ label: "Snacks missed",       pts: -25 }); }
-  if (entry.supps === true)      { score += 25;  breakdown.push({ label: "Daily supplements",  pts: 25  }); }
-  if (entry.supps === false)     { score -= 25;  breakdown.push({ label: "Supplements missed", pts: -25 }); }
+  if (entry.breakfast === true)  { score += 25;  breakdown.push({ label: "Breakfast on plan",    pts: 25  }); }
+  if (entry.breakfast === false) { score -= 25;  breakdown.push({ label: "Breakfast missed",     pts: -25 }); }
+  if (entry.lunch === true)      { score += 25;  breakdown.push({ label: "Lunch on plan",        pts: 25  }); }
+  if (entry.lunch === false)     { score -= 25;  breakdown.push({ label: "Lunch missed",         pts: -25 }); }
+  if (entry.snacks === true)     { score += 25;  breakdown.push({ label: "Snacks on plan",       pts: 25  }); }
+  if (entry.snacks === false)    { score -= 25;  breakdown.push({ label: "Snacks missed",        pts: -25 }); }
+  if (entry.supps === true)      { score += 25;  breakdown.push({ label: "Daily supplements",   pts: 25  }); }
+  if (entry.supps === false)     { score -= 25;  breakdown.push({ label: "Supplements missed",  pts: -25 }); }
 
   for (const g of GRINDSTONE_TYPES) {
     if ((entry.grindstone || []).includes(g.id)) {
@@ -98,8 +107,8 @@ function calcDailyScore(entry, drinkStreak) {
 function calcWeeklyPenalty(weekEntries) {
   const grindDone = new Set();
   for (const e of weekEntries) for (const g of (e?.grindstone || [])) grindDone.add(g);
-  const grindCount   = grindDone.size;
-  const towerDays    = weekEntries.filter(e => e?.towers).length;
+  const grindCount  = grindDone.size;
+  const towerDays   = weekEntries.filter(e => e?.towers).length;
   const grindPenalty = grindCount >= 4 ? 0 : grindCount === 3 ? -100 : grindCount === 2 ? -200 : grindCount === 1 ? -300 : -400;
   const towerPenalty = towerDays  >= 3 ? 0 : towerDays  === 2 ? -50  : towerDays  === 1 ? -100 : -150;
   const breakdown = [];
@@ -113,6 +122,7 @@ function buildSeries(entries, weeklyPenalties) {
   let cumulative  = 0;
   let drinkStreak = 0;
   const series    = [];
+
   for (const date of allDates) {
     const entry     = entries[date];
     const { score } = calcDailyScore(entry, drinkStreak);
@@ -125,6 +135,7 @@ function buildSeries(entries, weeklyPenalties) {
   return series;
 }
 
+// ── Firebase ─────────────────────────────────────────────────────────────────
 async function loadData() {
   try {
     const snap = await getDoc(doc(db, "habits", USER_ID));
@@ -137,15 +148,17 @@ async function saveData(data) {
   catch(e) { console.error(e); }
 }
 
+// ── Empty form ────────────────────────────────────────────────────────────────
 const EMPTY_ENTRY = {
   sober: null, drinks: 0,
   breakfast: null, lunch: null, snacks: null, supps: null,
-  grindstone: [], towers: false,
+  grindstone: [], towers: null,
   miles: "", poorSleep: false, junkFood: false,
 };
 
+// ── Line chart component ──────────────────────────────────────────────────────
 function LineChart({ series, range }) {
-  const svgRef = useRef(null);
+  const svgRef   = useRef(null);
   const [hov, setHov] = useState(null);
 
   const data = range === "all" ? series : series.slice(-range);
@@ -167,8 +180,9 @@ function LineChart({ series, range }) {
 
   const linePath = data.map((s,i) => `${i===0?"M":"L"}${xS(i).toFixed(1)},${yS(s.cumulative).toFixed(1)}`).join(" ");
   const areaPath = linePath + ` L${xS(data.length-1).toFixed(1)},${cH} L0,${cH} Z`;
-  const isUp     = data[data.length-1].cumulative >= data[0].cumulative;
-  const lineClr  = isUp ? "#2d6a4f" : "#c1121f";
+
+  const isUp    = data[data.length-1].cumulative >= data[0].cumulative;
+  const lineClr = isUp ? "#2d6a4f" : "#c1121f";
 
   const yTicks = [];
   const range_ = yMax - yMin;
@@ -176,7 +190,6 @@ function LineChart({ series, range }) {
   for (let v = Math.ceil(yMin/step)*step; v <= yMax; v += step) yTicks.push(v);
 
   function handleMove(e) {
-    if (!svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     const x    = (e.clientX - rect.left - PAD.left) / (rect.width * cW / W);
     const idx  = Math.round((x / cW) * (data.length - 1));
@@ -186,8 +199,10 @@ function LineChart({ series, range }) {
   return (
     <div>
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`}
-        onMouseMove={handleMove}
-        onTouchMove={e => { const t = e.touches[0]; handleMove({ clientX: t.clientX, clientY: t.clientY }); }}
+        onMouseMove={handleMove} onTouchMove={e => {
+          const t = e.touches[0];
+          handleMove({ clientX: t.clientX, clientY: t.clientY });
+        }}
         onMouseLeave={() => setHov(null)} onTouchEnd={() => setHov(null)}
         style={{ overflow:"visible", cursor:"crosshair", display:"block" }}>
         <defs>
@@ -224,7 +239,7 @@ function LineChart({ series, range }) {
               </g>
             );
           })()}
-          {data.filter((_,i) => i % Math.ceil(data.length/5) === 0 || i === data.length-1).map((s) => {
+          {data.filter((_,i) => i % Math.ceil(data.length/5) === 0 || i === data.length-1).map((s,_,arr) => {
             const i = data.indexOf(s);
             return <text key={i} x={xS(i)} y={cH+16} fill="#bbb" fontSize={7} textAnchor="middle">{fmtShort(s.date)}</text>;
           })}
@@ -241,14 +256,16 @@ function LineChart({ series, range }) {
   );
 }
 
+// ── Log form (reusable for today + past dates) ────────────────────────────────
 function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel }) {
   const [form,   setForm]   = useState({ ...EMPTY_ENTRY, ...(initialEntry || {}) });
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   const isPast = dateStr < todayStr;
 
-  const weekStart     = getWeekStart(dateStr);
-  const weekDates     = getWeekDates(weekStart);
+  // Which grindstone types are already done in this week on OTHER days
+  const weekStart  = getWeekStart(dateStr);
+  const weekDates  = getWeekDates(weekStart);
   const doneElsewhere = new Set(
     weekDates.filter(d => d !== dateStr).flatMap(d => weekData[d]?.grindstone || [])
   );
@@ -259,6 +276,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
     setForm(f => ({ ...f, grindstone: curr.includes(id) ? curr.filter(x=>x!==id) : [...curr, id] }));
   }
 
+  // Score preview — for past dates streak is approximate
   const { score: previewScore, breakdown } = calcDailyScore(form, 0);
 
   async function handleSave() {
@@ -274,6 +292,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         {fmtDate(dateStr)}{isPast ? " (editing past)" : ""}
       </div>
 
+      {/* Alcohol */}
       <div style={sectionTitle}>Alcohol</div>
       <div style={card}>
         <div style={{ fontSize:10, color:"#aaa", marginBottom:8 }}>Sober: +100 pts &nbsp;|&nbsp; Drinking: -250 base + -25/drink (doubles each consecutive night)</div>
@@ -293,13 +312,14 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         )}
       </div>
 
+      {/* Nutrition */}
       <div style={sectionTitle}>Nutrition</div>
       <div style={card}>
         {[
-          { key:"breakfast", label:"Breakfast on plan", pts:25 },
-          { key:"lunch",     label:"Lunch on plan",     pts:25 },
-          { key:"snacks",    label:"Snacks on plan",    pts:25 },
-          { key:"supps",     label:"Daily supplements", pts:25 },
+          { key:"breakfast", label:"Breakfast on plan",  pts:25 },
+          { key:"lunch",     label:"Lunch on plan",      pts:25 },
+          { key:"snacks",    label:"Snacks on plan",     pts:25 },
+          { key:"supps",     label:"Daily supplements",  pts:25 },
         ].map((f,i,arr) => (
           <div key={f.key} style={{ ...fieldStyle, borderBottom: i===arr.length-1?"none":undefined }}>
             <div>
@@ -314,6 +334,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         ))}
       </div>
 
+      {/* Grindstone */}
       <div style={sectionTitle}>Grindstone</div>
       <div style={card}>
         <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
@@ -338,6 +359,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         </div>
       </div>
 
+      {/* Cardio */}
       <div style={sectionTitle}>Cardio</div>
       <div style={card}>
         <div style={fieldStyle}>
@@ -364,11 +386,12 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         </div>
       </div>
 
+      {/* Penalties */}
       <div style={sectionTitle}>Penalties</div>
       <div style={card}>
         {[
-          { key:"poorSleep", label:"Sleep <6 hours",       pts:-150 },
-          { key:"junkFood",  label:"Junk food / off-plan", pts:-100 },
+          { key:"poorSleep", label:"Sleep <6 hours",         pts:-150 },
+          { key:"junkFood",  label:"Junk food / off-plan",   pts:-100 },
         ].map((f,i,arr) => (
           <div key={f.key} style={{ ...fieldStyle, borderBottom: i===arr.length-1?"none":undefined }}>
             <div>
@@ -382,6 +405,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
         ))}
       </div>
 
+      {/* Preview */}
       <div style={{ background:"#f0ede8", border:"1px solid #ddd", padding:"14px", marginBottom:20 }}>
         <div style={{ fontSize:10, letterSpacing:3, color:"#aaa", textTransform:"uppercase", marginBottom:10 }}>Score Preview</div>
         {breakdown.map((b,i) => (
@@ -401,15 +425,16 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
             Cancel
           </button>
         )}
-        <button onClick={handleSave} disabled={saving || form.sober===null}
-          style={{ flex:2, padding:14, background:form.sober===null||saving?"#ccc":"#1a1a1a", color:"#f8f6f2", border:"none", cursor:form.sober===null?"not-allowed":"pointer", fontFamily:"Georgia,serif", fontSize:12, letterSpacing:3, textTransform:"uppercase" }}>
-          {saving?"Saving…":saved?"✓ Saved":isPast?"Update Entry":"Save Today"}
+        <button onClick={handleSave} disabled={saving}
+          style={{ flex:2, padding:14, background:saving?"#ccc":"#1a1a1a", color:"#f8f6f2", border:"none", cursor:"pointer", fontFamily:"Georgia,serif", fontSize:12, letterSpacing:3, textTransform:"uppercase" }}>
+          {saving?"Saving…":saved?"✓ Saved":isPast?"Update Entry":"Save"}
         </button>
       </div>
     </div>
   );
 }
 
+// ── Shared styles ─────────────────────────────────────────────────────────────
 const sectionTitle = { fontSize:10, letterSpacing:3, textTransform:"uppercase", color:"#aaa", margin:"20px 0 10px" };
 const card         = { background:"#fff", border:"1px solid #ebe8e3", padding:"14px", marginBottom:10 };
 const fieldStyle   = { borderBottom:"1px solid #ebe8e3", padding:"12px 0", display:"flex", justifyContent:"space-between", alignItems:"center" };
@@ -418,37 +443,48 @@ const counterBtn   = { width:28, height:28, border:"1px solid #ddd", background:
 function checkBtn(active, color) {
   const colors = { green:{ border:"#2d6a4f", text:"#2d6a4f", bg:"#f0f7f4" }, red:{ border:"#c1121f", text:"#c1121f", bg:"#fdf0f0" } };
   const c = colors[color];
-  return { flex:1, padding:"11px 4px", border:`1px solid ${active?c.border:"#ddd"}`, background:active?c.bg:"#fff", cursor:"pointer", fontFamily:"Georgia,serif", fontSize:11, letterSpacing:1, color:active?c.text:"#aaa", transition:"all 0.15s" };
+  return {
+    flex:1, padding:"11px 4px", border:`1px solid ${active?c.border:"#ddd"}`,
+    background: active?c.bg:"#fff", cursor:"pointer", fontFamily:"Georgia,serif",
+    fontSize:11, letterSpacing:1, color: active?c.text:"#aaa", transition:"all 0.15s",
+  };
 }
 
 function smallCheck(active, color) {
   const colors = { green:{ border:"#2d6a4f", text:"#2d6a4f", bg:"#f0f7f4" }, red:{ border:"#c1121f", text:"#c1121f", bg:"#fdf0f0" } };
   const c = colors[color];
-  return { padding:"6px 14px", border:`1px solid ${active?c.border:"#ddd"}`, background:active?c.bg:"#fff", cursor:"pointer", fontFamily:"Georgia,serif", fontSize:11, color:active?c.text:"#aaa" };
+  return {
+    padding:"6px 14px", border:`1px solid ${active?c.border:"#ddd"}`,
+    background: active?c.bg:"#fff", cursor:"pointer", fontFamily:"Georgia,serif",
+    fontSize:11, color: active?c.text:"#aaa",
+  };
 }
 
+// ── Main App ──────────────────────────────────────────────────────────────────
 const TABS = ["today","trend","weekly","history"];
 
 export default function App() {
   const [data,       setData]      = useState({ entries:{}, weeklyPenalties:{} });
   const [loaded,     setLoaded]    = useState(false);
   const [activeTab,  setActiveTab] = useState("today");
-  const [chartRange, setChartRange]= useState(14);
-  const [editDate,   setEditDate]  = useState(null);
+  const [chartRange, setChartRange]= useState(30);
+  const [editDate,   setEditDate]  = useState(null); // null = not editing past
   const todayStr = getTodayStr();
 
   useEffect(() => {
     loadData().then(d => { setData(d); setLoaded(true); });
   }, []);
 
-  const series    = buildSeries(data.entries || {}, data.weeklyPenalties || {});
-  const allDates  = Object.keys(data.entries || {}).sort();
-  const latestScore     = series.length ? series[series.length-1].cumulative : 0;
-  const todayInSeries   = series.find(s => s.date === todayStr);
-  const todayScore      = todayInSeries?.score || 0;
-  const weekStart       = getWeekStart(todayStr);
-  const weekDates       = getWeekDates(weekStart);
-  const weekEntries     = weekDates.map(d => data.entries?.[d]).filter(Boolean);
+  const series = buildSeries(data.entries || {}, data.weeklyPenalties || {});
+  const allDates = Object.keys(data.entries || {}).sort();
+
+  const latestScore = series.length ? series[series.length-1].cumulative : 0;
+  const todayInSeries = series.find(s => s.date === todayStr);
+  const todayScore  = todayInSeries?.score || 0;
+
+  const weekStart   = getWeekStart(todayStr);
+  const weekDates   = getWeekDates(weekStart);
+  const weekEntries = weekDates.map(d => data.entries?.[d]).filter(Boolean);
   const { grindCount, towerDays, grindDone } = calcWeeklyPenalty(weekEntries);
 
   async function handleSaveEntry(dateStr, form) {
@@ -466,28 +502,30 @@ export default function App() {
   return (
     <div style={{ minHeight:"100vh", background:"#f8f6f2", color:"#1a1a1a", fontFamily:"Georgia,serif", maxWidth:480, margin:"0 auto", paddingBottom:80 }}>
 
+      {/* Header */}
       <div style={{ background:"#fff", borderBottom:"1px solid #ebe8e3", padding:"48px 20px 20px" }}>
         <div style={{ fontSize:10, letterSpacing:4, color:"#aaa", textTransform:"uppercase", marginBottom:6 }}>Daily Habit Score</div>
         <div style={{ display:"flex", alignItems:"baseline", gap:12, marginBottom:12 }}>
-          <span style={{ fontSize:52, fontWeight:400, lineHeight:1, color:latestScore>=0?"#2d6a4f":"#c1121f" }}>
+          <span style={{ fontSize:52, fontWeight:400, lineHeight:1, color: latestScore>=0?"#2d6a4f":"#c1121f" }}>
             {latestScore>0?"+":""}{latestScore.toLocaleString()}
           </span>
           <div style={{ fontSize:12, color:"#aaa" }}>{todayScore>0?"+":""}{todayScore} today</div>
         </div>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           {[
-            { label:"GRINDSTONE", val:`${grindCount}/4`, ok:grindCount>=4 },
-            { label:"TOWERS",     val:`${towerDays}/3`,  ok:towerDays>=3  },
+            { label:"GRINDSTONE", val:`${grindCount}/4`, ok: grindCount>=4 },
+            { label:"TOWERS",     val:`${towerDays}/3`,  ok: towerDays>=3  },
             { label:"WEEK OF",    val:fmtShort(weekStart), ok:true },
           ].map((s,i) => (
             <div key={i} style={{ background:"#f0ede8", padding:"5px 10px", fontSize:10, letterSpacing:1 }}>
               <span style={{ color:"#aaa" }}>{s.label} </span>
-              <span style={{ color:s.ok?"#2d6a4f":"#c1121f" }}>{s.val}</span>
+              <span style={{ color: s.ok?"#2d6a4f":"#c1121f" }}>{s.val}</span>
             </div>
           ))}
         </div>
       </div>
 
+      {/* Tabs */}
       <div style={{ display:"flex", background:"#fff", borderBottom:"1px solid #ebe8e3" }}>
         {TABS.map(t => (
           <button key={t} onClick={() => { setActiveTab(t); setEditDate(null); }}
@@ -497,6 +535,7 @@ export default function App() {
         ))}
       </div>
 
+      {/* ── TODAY ── */}
       {activeTab === "today" && (
         <div style={{ padding:"20px" }}>
           <EntryForm
@@ -509,6 +548,7 @@ export default function App() {
         </div>
       )}
 
+      {/* ── TREND ── */}
       {activeTab === "trend" && (
         <div style={{ padding:"20px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
@@ -516,24 +556,27 @@ export default function App() {
             <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
               {[{label:"2W",days:14},{label:"4W",days:28},{label:"6W",days:42},{label:"12W",days:84},{label:"18W",days:126},{label:"All",days:"all"}].map(r => (
                 <button key={r.label} onClick={() => setChartRange(r.days)}
-                  style={{ padding:"4px 8px", border:`1px solid ${chartRange===r.days?"#1a1a1a":"#ddd"}`, background:chartRange===r.days?"#1a1a1a":"#fff", color:chartRange===r.days?"#f8f6f2":"#aaa", cursor:"pointer", fontFamily:"Georgia,serif", fontSize:10, letterSpacing:1 }}>
+                  style={{ padding:"4px 10px", border:`1px solid ${chartRange===r.days?"#1a1a1a":"#ddd"}`, background:chartRange===r.days?"#1a1a1a":"#fff", color:chartRange===r.days?"#f8f6f2":"#aaa", cursor:"pointer", fontFamily:"Georgia,serif", fontSize:10, letterSpacing:1 }}>
                   {r.label}
                 </button>
               ))}
             </div>
           </div>
+
           <div style={{ ...card, padding:"16px 8px 8px" }}>
             <LineChart series={series} range={chartRange}/>
           </div>
+
+          {/* All time stats */}
           <div style={sectionTitle}>All Time</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
             {[
-              { label:"Total score",   val:`${latestScore>0?"+":""}${latestScore}`,                                   color:latestScore>=0?"#2d6a4f":"#c1121f" },
-              { label:"Days logged",   val:allDates.length,                                                            color:"#1a1a1a" },
-              { label:"Sober days",    val:allDates.filter(d=>data.entries[d]?.sober).length,                          color:"#2d6a4f" },
-              { label:"Drinking days", val:allDates.filter(d=>data.entries[d]?.sober===false).length,                  color:"#c1121f" },
-              { label:"Best day",      val:series.length?`+${Math.max(...series.map(s=>s.score))}`:"—",               color:"#2d6a4f" },
-              { label:"Worst day",     val:series.length?`${Math.min(...series.map(s=>s.score))}`:"—",                color:"#c1121f" },
+              { label:"Total score",   val:`${latestScore>0?"+":""}${latestScore}`,             color:latestScore>=0?"#2d6a4f":"#c1121f" },
+              { label:"Days logged",   val:allDates.length,                                      color:"#1a1a1a" },
+              { label:"Sober days",    val:allDates.filter(d=>data.entries[d]?.sober).length,    color:"#2d6a4f" },
+              { label:"Drinking days", val:allDates.filter(d=>data.entries[d]?.sober===false).length, color:"#c1121f" },
+              { label:"Best day",      val:series.length?`+${Math.max(...series.map(s=>s.score))}`:"—", color:"#2d6a4f" },
+              { label:"Worst day",     val:series.length?`${Math.min(...series.map(s=>s.score))}`:"—", color:"#c1121f" },
             ].map((s,i) => (
               <div key={i} style={{ ...card, padding:"12px 14px" }}>
                 <div style={{ fontSize:9, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:6 }}>{s.label}</div>
@@ -544,9 +587,11 @@ export default function App() {
         </div>
       )}
 
+      {/* ── WEEKLY ── */}
       {activeTab === "weekly" && (
         <div style={{ padding:"20px" }}>
           <div style={sectionTitle}>Week of {fmtShort(weekStart)}</div>
+
           <div style={card}>
             <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>Grindstone Sessions</div>
             <div style={{ display:"flex", gap:5, marginBottom:12 }}>
@@ -558,9 +603,10 @@ export default function App() {
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
               <span style={{ color:"#aaa" }}>{grindCount} of 4 sessions</span>
-              <span style={{ color:grindCount>=4?"#2d6a4f":"#c1121f" }}>{grindCount>=4?"On track ✓":"Penalty pending"}</span>
+              <span style={{ color:grindCount>=4?"#2d6a4f":"#c1121f" }}>{grindCount>=4?"On track ✓":`${calcWeeklyPenalty(weekEntries).grindPenalty||""} penalty if week ends now`}</span>
             </div>
           </div>
+
           <div style={card}>
             <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>Towers Days</div>
             <div style={{ display:"flex", gap:5, marginBottom:12 }}>
@@ -576,9 +622,10 @@ export default function App() {
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
               <span style={{ color:"#aaa" }}>{towerDays} of 3 days</span>
-              <span style={{ color:towerDays>=3?"#2d6a4f":"#c1121f" }}>{towerDays>=3?"On track ✓":"Penalty pending"}</span>
+              <span style={{ color:towerDays>=3?"#2d6a4f":"#c1121f" }}>{towerDays>=3?"On track ✓":"Penalty if week ends now"}</span>
             </div>
           </div>
+
           <div style={sectionTitle}>Daily Breakdown</div>
           {weekDates.filter(d => d <= todayStr && data.entries?.[d]).map(d => {
             const e = data.entries[d];
@@ -596,8 +643,10 @@ export default function App() {
         </div>
       )}
 
+      {/* ── HISTORY ── */}
       {activeTab === "history" && (
         <div style={{ padding:"20px" }}>
+          {/* Edit past date picker */}
           {editDate ? (
             <div>
               <EntryForm
@@ -615,13 +664,18 @@ export default function App() {
                 <div style={{ ...sectionTitle, margin:0 }}>All Entries</div>
                 <div style={{ fontSize:11, color:"#aaa" }}>Tap to edit</div>
               </div>
+
+              {/* Quick date picker for missing days */}
               <div style={{ ...card, marginBottom:16 }}>
                 <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:10 }}>Log a Past Day</div>
-                <input type="date" max={todayStr}
-                  style={{ width:"100%", padding:"8px 10px", border:"1px solid #ddd", background:"#fff", fontFamily:"Georgia,serif", fontSize:13, color:"#1a1a1a", outline:"none" }}
-                  onChange={e => { if (e.target.value) setEditDate(e.target.value); }}
-                />
+                <div style={{ display:"flex", gap:8 }}>
+                  <input type="date" max={todayStr}
+                    style={{ flex:1, padding:"8px 10px", border:"1px solid #ddd", background:"#fff", fontFamily:"Georgia,serif", fontSize:13, color:"#1a1a1a", outline:"none" }}
+                    onChange={e => { if (e.target.value) setEditDate(e.target.value); }}
+                  />
+                </div>
               </div>
+
               {[...allDates].reverse().map(date => {
                 const e = data.entries[date];
                 const { score, breakdown } = calcDailyScore(e, 0);
