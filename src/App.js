@@ -124,13 +124,14 @@ function buildSeries(entries, weeklyPenalties) {
   const series    = [];
 
   for (const date of allDates) {
-    const entry     = entries[date];
-    const { score } = calcDailyScore(entry, drinkStreak);
-    drinkStreak     = entry?.sober ? 0 : drinkStreak + 1;
-    cumulative     += score;
-    const wp        = weeklyPenalties?.[date] || 0;
-    cumulative     += wp;
-    series.push({ date, score, cumulative, sober: entry?.sober, wp });
+    const entry          = entries[date];
+    const streakForToday = drinkStreak;
+    const { score }      = calcDailyScore(entry, streakForToday);
+    drinkStreak          = entry?.sober ? 0 : drinkStreak + 1;
+    cumulative          += score;
+    const wp             = weeklyPenalties?.[date] || 0;
+    cumulative          += wp;
+    series.push({ date, score, cumulative, sober: entry?.sober, wp, drinkStreak: streakForToday });
   }
   return series;
 }
@@ -257,7 +258,7 @@ function LineChart({ series, range }) {
 }
 
 // ── Log form (reusable for today + past dates) ────────────────────────────────
-function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel }) {
+function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel, drinkStreak }) {
   const [form,   setForm]   = useState({ ...EMPTY_ENTRY, ...(initialEntry || {}) });
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
@@ -276,8 +277,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
     setForm(f => ({ ...f, grindstone: curr.includes(id) ? curr.filter(x=>x!==id) : [...curr, id] }));
   }
 
-  // Score preview — for past dates streak is approximate
-  const { score: previewScore, breakdown } = calcDailyScore(form, 0);
+  const { score: previewScore, breakdown } = calcDailyScore(form, drinkStreak || 0);
 
   async function handleSave() {
     setSaving(true);
@@ -551,6 +551,17 @@ export default function App() {
             weekData={data.entries || {}}
             todayStr={todayStr}
             onSave={handleSaveEntry}
+            drinkStreak={(() => {
+              const s = series.find(s => s.date === todayStr);
+              if (s) return s.drinkStreak;
+              // Not yet saved today — look at yesterday
+              const allDates = Object.keys(data.entries || {}).sort();
+              const lastDate = allDates[allDates.length - 1];
+              if (!lastDate) return 0;
+              const lastSeries = series.find(s => s.date === lastDate);
+              if (!lastSeries) return 0;
+              return data.entries[lastDate]?.sober ? 0 : lastSeries.drinkStreak + 1;
+            })()}
           />
         </div>
       )}
@@ -636,7 +647,8 @@ export default function App() {
           <div style={sectionTitle}>Daily Breakdown</div>
           {weekDates.filter(d => d <= todayStr && data.entries?.[d]).map(d => {
             const e = data.entries[d];
-            const { score } = calcDailyScore(e, 0);
+            const s = series.find(s => s.date === d);
+            const { score } = calcDailyScore(e, s?.drinkStreak || 0);
             return (
               <div key={d} style={{ ...card, display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px" }}>
                 <div>
@@ -663,6 +675,7 @@ export default function App() {
                 todayStr={todayStr}
                 onSave={async (d, f) => { await handleSaveEntry(d, f); setEditDate(null); }}
                 onCancel={() => setEditDate(null)}
+                drinkStreak={series.find(s => s.date === editDate)?.drinkStreak || 0}
               />
             </div>
           ) : (
@@ -684,8 +697,9 @@ export default function App() {
               </div>
 
               {[...allDates].reverse().map(date => {
-                const e = data.entries[date];
-                const { score, breakdown } = calcDailyScore(e, 0);
+                const e  = data.entries[date];
+                const s  = series.find(s => s.date === date);
+                const { score, breakdown } = calcDailyScore(e, s?.drinkStreak || 0);
                 const wp = data.weeklyPenalties?.[date];
                 return (
                   <div key={date} style={{ ...card, marginBottom:8 }}>
