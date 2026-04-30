@@ -92,7 +92,11 @@ function calcDailyScore(entry, drinkStreak) {
     }
   }
 
-  if (entry.towers) { score += 25; breakdown.push({ label: "Towers", pts: 25 }); }
+  if (entry.towers) { 
+    const towerReps = parseInt(entry.towers) || 0;
+    const pts = towerReps * 2;
+    if (pts > 0) { score += pts; breakdown.push({ label: `Towers (${towerReps} reps)`, pts }); }
+  }
 
   const miles = parseFloat(entry.miles) || 0;
   if (miles > 0) {
@@ -111,7 +115,7 @@ function calcWeeklyPenalty(weekEntries) {
   const grindDone = new Set();
   for (const e of weekEntries) for (const g of (e?.grindstone || [])) grindDone.add(g);
   const grindCount = grindDone.size;
-  const towerDays  = weekEntries.filter(e => e?.towers).length;
+  const towerReps  = weekEntries.reduce((sum, e) => sum + (parseInt(e?.towers) || 0), 0);
 
   const grindPenalty = grindCount >= 5 ? 200  :
                        grindCount === 4 ? 0    :
@@ -119,18 +123,14 @@ function calcWeeklyPenalty(weekEntries) {
                        grindCount === 2 ? -200 :
                        grindCount === 1 ? -300 : -400;
 
-  const towerPenalty = towerDays >= 4 ? 100  :
-                       towerDays === 3 ? 0    :
-                       towerDays === 2 ? -50  :
-                       towerDays === 1 ? -100 : -150;
+  const towerPenalty = towerReps >= 55 ? 100 : 0;
 
   const breakdown = [];
   if (grindPenalty > 0) breakdown.push({ label: `Grindstone bonus (${grindCount}/5 sessions) 🏆`, pts: grindPenalty });
   if (grindPenalty < 0) breakdown.push({ label: `Grindstone (${grindCount}/4 sessions)`,           pts: grindPenalty });
-  if (towerPenalty > 0) breakdown.push({ label: `Towers bonus (${towerDays}/4 days) 🏆`,           pts: towerPenalty });
-  if (towerPenalty < 0) breakdown.push({ label: `Towers (${towerDays}/3 days)`,                    pts: towerPenalty });
+  if (towerPenalty > 0) breakdown.push({ label: `Towers bonus (${towerReps}/55 reps) 🏆`,          pts: towerPenalty });
 
-  return { penalty: grindPenalty + towerPenalty, breakdown, grindCount, towerDays, grindDone };
+  return { penalty: grindPenalty + towerPenalty, breakdown, grindCount, towerDays: towerReps, grindDone };
 }
 
 function buildSeries(entries, weeklyPenalties) {
@@ -169,7 +169,7 @@ async function saveData(data) {
 const EMPTY_ENTRY = {
   sober: null, drinks: 0,
   breakfast: null, lunch: null, snacks: null, supps: null,
-  grindstone: [], towers: null,
+  grindstone: [], towers: 0,
   miles: "", poorSleep: false, junkFood: false,
 };
 
@@ -380,12 +380,13 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
       <div style={card}>
         <div style={fieldStyle}>
           <div>
-            <div style={{ fontSize:13 }}>Towers completed</div>
-            <div style={{ fontSize:10, color:"#aaa" }}>+25 pts</div>
+            <div style={{ fontSize:13 }}>Towers</div>
+            <div style={{ fontSize:10, color:"#aaa" }}>+2 pts/rep · 40/week neutral · 55+/week bonus</div>
           </div>
-          <div style={{ display:"flex", gap:6 }}>
-            <button style={smallCheck(form.towers===true,"green")}  onClick={() => setForm(f=>({...f,towers:true}))}>✓</button>
-            <button style={smallCheck(form.towers===false,"red")}   onClick={() => setForm(f=>({...f,towers:false}))}>✗</button>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <button onClick={() => setForm(f=>({...f,towers:Math.max(0,(f.towers||0)-1)}))} style={counterBtn}>−</button>
+            <span style={{ fontSize:20, minWidth:28, textAlign:"center" }}>{form.towers||0}</span>
+            <button onClick={() => setForm(f=>({...f,towers:(f.towers||0)+1}))} style={counterBtn}>+</button>
           </div>
         </div>
         <div style={{ ...fieldStyle, borderBottom:"none" }}>
@@ -537,7 +538,7 @@ export default function App() {
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           {[
             { label:"GRINDSTONE", val:`${grindCount}/4`, ok: grindCount>=4 },
-            { label:"TOWERS",     val:`${towerDays}/3`,  ok: towerDays>=3  },
+            { label:"TOWERS",     val:`${towerDays} reps`,  ok: towerDays>=55  },
             { label:"WEEK OF",    val:fmtShort(weekStart), ok:true },
           ].map((s,i) => (
             <div key={i} style={{ background:"#f0ede8", padding:"5px 10px", fontSize:10, letterSpacing:1 }}>
@@ -644,22 +645,22 @@ export default function App() {
           </div>
 
           <div style={card}>
-            <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>Towers Days</div>
+            <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>Towers Reps This Week</div>
             <div style={{ display:"flex", gap:5, marginBottom:12 }}>
               {weekDates.map((d,i) => {
-                const hasTowers = data.entries?.[d]?.towers;
-                const dayName   = new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"});
+                const reps    = parseInt(data.entries?.[d]?.towers) || 0;
+                const dayName = new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"});
                 return (
-                  <div key={i} style={{ flex:1, padding:"8px 4px", textAlign:"center", border:`1px solid ${hasTowers?"#2d6a4f":"#ddd"}`, background:hasTowers?"#f0f7f4":d>todayStr?"#f8f6f2":"#fff", fontSize:9, color:hasTowers?"#2d6a4f":"#aaa" }}>
-                    {dayName}<br/>{hasTowers?"✓":d>todayStr?"·":"—"}
+                  <div key={i} style={{ flex:1, padding:"8px 4px", textAlign:"center", border:`1px solid ${reps>0?"#2d6a4f":"#ddd"}`, background:reps>0?"#f0f7f4":d>todayStr?"#f8f6f2":"#fff", fontSize:9, color:reps>0?"#2d6a4f":"#aaa" }}>
+                    {dayName}<br/>{reps>0?reps:d>todayStr?"·":"—"}
                   </div>
                 );
               })}
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
-              <span style={{ color:"#aaa" }}>{towerDays} of 4 days</span>
-              <span style={{ color: towerDays>=4?"#2d6a4f": towerDays>=3?"#2d6a4f":"#c1121f" }}>
-                {towerDays>=4?"Bonus +100 🏆": towerDays>=3?"On track ✓":"Penalty pending"}
+              <span style={{ color:"#aaa" }}>{towerDays} reps this week</span>
+              <span style={{ color: towerDays>=55?"#2d6a4f":"#aaa" }}>
+                {towerDays>=55?"Bonus +100 🏆": towerDays>=40?`${55-towerDays} more for bonus`:`${55-towerDays} more for bonus`}
               </span>
             </div>
           </div>
