@@ -3,8 +3,7 @@ import { db } from "./firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-const USER_ID   = "dan";
-const AZ_OFFSET = -7;
+const USER_ID = "dan";
 
 const GRINDSTONE_TYPES = [
   { id: "lower",        label: "Lower",        points: 100 },
@@ -16,9 +15,13 @@ const GRINDSTONE_TYPES = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getAZDate(date = new Date()) {
-  const utc = date.getTime() + date.getTimezoneOffset() * 60000;
-  const az  = new Date(utc + AZ_OFFSET * 3600000);
-  return az.toISOString().split("T")[0];
+  // Always get the current date in Arizona time (MST, UTC-7, no DST)
+  const azStr = date.toLocaleString("en-US", { timeZone: "America/Phoenix" });
+  const azDate = new Date(azStr);
+  const year  = azDate.getFullYear();
+  const month = String(azDate.getMonth() + 1).padStart(2, "0");
+  const day   = String(azDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getTodayStr() { return getAZDate(); }
