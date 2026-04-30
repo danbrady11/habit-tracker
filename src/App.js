@@ -604,21 +604,105 @@ export default function App() {
 
           {/* All time stats */}
           <div style={sectionTitle}>All Time</div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            {[
-              { label:"Total score",   val:`${latestScore>0?"+":""}${latestScore}`,             color:latestScore>=0?"#2d6a4f":"#c1121f" },
-              { label:"Days logged",   val:allDates.length,                                      color:"#1a1a1a" },
-              { label:"Sober days",    val:allDates.filter(d=>data.entries[d]?.sober).length,    color:"#2d6a4f" },
-              { label:"Drinking days", val:allDates.filter(d=>data.entries[d]?.sober===false).length, color:"#c1121f" },
-              { label:"Best day",      val:series.length?`+${Math.max(...series.map(s=>s.score))}`:"—", color:"#2d6a4f" },
-              { label:"Worst day",     val:series.length?`${Math.min(...series.map(s=>s.score))}`:"—", color:"#c1121f" },
-            ].map((s,i) => (
-              <div key={i} style={{ ...card, padding:"12px 14px" }}>
-                <div style={{ fontSize:9, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:6 }}>{s.label}</div>
-                <div style={{ fontSize:24, color:s.color }}>{s.val}</div>
-              </div>
-            ))}
-          </div>
+          {(() => {
+            const INCEPTION = "2026-04-26";
+            const today = getTodayStr();
+
+            // Best/worst day
+            const bestDay  = series.length ? series.reduce((a,b) => b.score > a.score ? b : a) : null;
+            const worstDay = series.length ? series.reduce((a,b) => b.score < a.score ? b : a) : null;
+
+            // Build weekly totals
+            const weekMap = {};
+            for (const s of series) {
+              const ws = getWeekStart(s.date);
+              if (!weekMap[ws]) weekMap[ws] = { total: 0, start: ws };
+              weekMap[ws].total += s.score;
+            }
+            // Add weekly penalties
+            for (const [date, wp] of Object.entries(data.weeklyPenalties || {})) {
+              const ws = getWeekStart(date);
+              if (weekMap[ws]) weekMap[ws].total += wp;
+            }
+            const weekEntries2 = Object.values(weekMap);
+            const bestWeek  = weekEntries2.length ? weekEntries2.reduce((a,b) => b.total > a.total ? b : a) : null;
+            const worstWeek = weekEntries2.length ? weekEntries2.reduce((a,b) => b.total < a.total ? b : a) : null;
+
+            // Build monthly totals
+            const monthMap = {};
+            for (const s of series) {
+              const mo = s.date.slice(0,7); // "2026-04"
+              if (!monthMap[mo]) monthMap[mo] = { total: 0, month: mo };
+              monthMap[mo].total += s.score;
+            }
+            for (const [date, wp] of Object.entries(data.weeklyPenalties || {})) {
+              const mo = date.slice(0,7);
+              if (monthMap[mo]) monthMap[mo].total += wp;
+            }
+            const monthEntries = Object.values(monthMap);
+            const bestMonth  = monthEntries.length ? monthEntries.reduce((a,b) => b.total > a.total ? b : a) : null;
+            const worstMonth = monthEntries.length ? monthEntries.reduce((a,b) => b.total < a.total ? b : a) : null;
+
+            function fmtWeek(ws) {
+              return `Wk of ${fmtShort(ws)}`;
+            }
+            function fmtMonth(mo) {
+              const [y, m] = mo.split("-");
+              return new Date(parseInt(y), parseInt(m)-1, 1).toLocaleDateString("en-US", { month:"short", year:"numeric" });
+            }
+
+            // Sober counts
+            const last7  = allDates.filter(d => d >= addDays(today,-7));
+            const last14 = allDates.filter(d => d >= addDays(today,-14));
+            const last30 = allDates.filter(d => d >= addDays(today,-30));
+            const since  = allDates.filter(d => d >= INCEPTION);
+
+            const sober7  = last7.filter(d => data.entries[d]?.sober).length;
+            const sober14 = last14.filter(d => data.entries[d]?.sober).length;
+            const sober30 = last30.filter(d => data.entries[d]?.sober).length;
+            const soberSinceCount = since.filter(d => data.entries[d]?.sober).length;
+
+            const statCards = [
+              { label:"Total score",   val:`${latestScore>0?"+":""}${latestScore}`, sub:"all time", color:latestScore>=0?"#2d6a4f":"#c1121f" },
+              { label:"Days logged",   val:allDates.length, sub:"entries", color:"#1a1a1a" },
+              { label:"Best day",      val:bestDay?`${bestDay.score>0?"+":""}${bestDay.score}`:"—", sub:bestDay?fmtDate(bestDay.date):"", color:"#2d6a4f" },
+              { label:"Worst day",     val:worstDay?`${worstDay.score}`:"—", sub:worstDay?fmtDate(worstDay.date):"", color:"#c1121f" },
+              { label:"Best week",     val:bestWeek?`${bestWeek.total>0?"+":""}${bestWeek.total}`:"—", sub:bestWeek?fmtWeek(bestWeek.start):"", color:"#2d6a4f" },
+              { label:"Worst week",    val:worstWeek?`${worstWeek.total}`:"—", sub:worstWeek?fmtWeek(worstWeek.start):"", color:"#c1121f" },
+              { label:"Best month",    val:bestMonth?`${bestMonth.total>0?"+":""}${bestMonth.total}`:"—", sub:bestMonth?fmtMonth(bestMonth.month):"", color:"#2d6a4f" },
+              { label:"Worst month",   val:worstMonth?`${worstMonth.total}`:"—", sub:worstMonth?fmtMonth(worstMonth.month):"", color:"#c1121f" },
+            ];
+
+            return (
+              <>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16 }}>
+                  {statCards.map((s,i) => (
+                    <div key={i} style={{ ...card, padding:"12px 14px" }}>
+                      <div style={{ fontSize:9, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
+                      <div style={{ fontSize:22, color:s.color, lineHeight:1.1 }}>{s.val}</div>
+                      {s.sub && <div style={{ fontSize:9, color:"#bbb", marginTop:4 }}>{s.sub}</div>}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={sectionTitle}>Sobriety</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                  {[
+                    { label:"Last 7 days",  val:`${sober7}/${last7.length}`, color: sober7===last7.length?"#2d6a4f":sober7>last7.length*0.7?"#1a1a1a":"#c1121f" },
+                    { label:"Last 14 days", val:`${sober14}/${last14.length}`, color: sober14===last14.length?"#2d6a4f":sober14>last14.length*0.7?"#1a1a1a":"#c1121f" },
+                    { label:"Last 30 days", val:`${sober30}/${last30.length}`, color: sober30===last30.length?"#2d6a4f":sober30>last30.length*0.7?"#1a1a1a":"#c1121f" },
+                    { label:`Since Apr 26`, val:`${soberSinceCount}/${since.length} days`, color: soberSinceCount===since.length?"#2d6a4f":soberSinceCount>since.length*0.7?"#1a1a1a":"#c1121f" },
+                  ].map((s,i) => (
+                    <div key={i} style={{ ...card, padding:"12px 14px" }}>
+                      <div style={{ fontSize:9, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
+                      <div style={{ fontSize:i===3?16:22, color:s.color, lineHeight:1.1 }}>{s.val}</div>
+                      <div style={{ fontSize:9, color:"#bbb", marginTop:4 }}>sober days</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
