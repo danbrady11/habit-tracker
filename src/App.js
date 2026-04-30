@@ -118,16 +118,15 @@ function calcWeeklyPenalty(weekEntries) {
   const towerReps  = weekEntries.reduce((sum, e) => sum + (parseInt(e?.towers) || 0), 0);
 
   const grindPenalty = grindCount >= 5 ? 200  :
-                       grindCount === 4 ? 0    :
-                       grindCount === 3 ? -100 :
-                       grindCount === 2 ? -200 :
-                       grindCount === 1 ? -300 : -400;
+                       grindCount >= 3 ? 0    :
+                       grindCount === 2 ? -100 :
+                       grindCount === 1 ? -200 : -300;
 
   const towerPenalty = towerReps >= 55 ? 100 : 0;
 
   const breakdown = [];
   if (grindPenalty > 0) breakdown.push({ label: `Grindstone bonus (${grindCount}/5 sessions) 🏆`, pts: grindPenalty });
-  if (grindPenalty < 0) breakdown.push({ label: `Grindstone (${grindCount}/4 sessions)`,           pts: grindPenalty });
+  if (grindPenalty < 0) breakdown.push({ label: `Grindstone (${grindCount}/3 sessions)`,           pts: grindPenalty });
   if (towerPenalty > 0) breakdown.push({ label: `Towers bonus (${towerReps}/55 reps) 🏆`,          pts: towerPenalty });
 
   return { penalty: grindPenalty + towerPenalty, breakdown, grindCount, towerDays: towerReps, grindDone };
@@ -537,7 +536,7 @@ export default function App() {
         </div>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           {[
-            { label:"GRINDSTONE", val:`${grindCount}/4`, ok: grindCount>=4 },
+            { label:"GRINDSTONE", val:`${grindCount}/3`, ok: grindCount>=3 },
             { label:"TOWERS",     val:`${towerDays} reps`,  ok: towerDays>=55  },
             { label:"WEEK OF",    val:fmtShort(weekStart), ok:true },
           ].map((s,i) => (
@@ -722,8 +721,8 @@ export default function App() {
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
               <span style={{ color:"#aaa" }}>{grindCount} of 5 sessions</span>
-              <span style={{ color: grindCount>=5?"#2d6a4f": grindCount>=4?"#2d6a4f":"#c1121f" }}>
-                {grindCount>=5?"Bonus +200 🏆": grindCount>=4?"On track ✓":"Penalty pending"}
+              <span style={{ color: grindCount>=5?"#2d6a4f": grindCount>=3?"#2d6a4f":"#c1121f" }}>
+                {grindCount>=5?"Bonus +200 🏆": grindCount>=3?"On track ✓":"Penalty pending"}
               </span>
             </div>
           </div>
