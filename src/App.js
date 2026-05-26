@@ -68,12 +68,14 @@ function calcDailyScore(entry, drinkStreak) {
     score += 100;
     breakdown.push({ label: "Sober day", pts: 100 });
   } else if (entry.sober === false) {
-    const base     = drinkStreak === 0 ? -100 : drinkStreak === 1 ? -400 : -900;
-    const perDrink = drinkStreak === 0 ? -40  : drinkStreak === 1 ? -80  : -150;
-    const drinks   = entry.drinks || 0;
-    const penalty  = base + drinks * perDrink;
+    const day        = drinkStreak + 1;
+    const firstDrink = -(50 + (day - 1) * 25);
+    const increment  = -(15 + (day - 1) * 15);
+    const drinks     = entry.drinks || 0;
+    let penalty      = 0;
+    for (let i = 0; i < drinks; i++) penalty += firstDrink + i * increment;
     score += penalty;
-    breakdown.push({ label: `Drinking (${drinks} drinks, day ${drinkStreak + 1} consecutive)`, pts: penalty });
+    breakdown.push({ label: `Drinking (${drinks} drink${drinks !== 1 ? "s" : ""}, day ${day} consecutive)`, pts: penalty });
   }
 
   if (entry.breakfast === true)  { score += 25;  breakdown.push({ label: "Breakfast on plan",    pts: 25  }); }
@@ -108,7 +110,24 @@ function calcDailyScore(entry, drinkStreak) {
   if (entry.poorSleep) { score -= 150; breakdown.push({ label: "Sleep <6 hours",          pts: -150 }); }
   if (entry.junkFood)  { score -= 100; breakdown.push({ label: "Junk food / off-plan day", pts: -100 }); }
 
+  if (entry.rehab === true)  { score += 25;  breakdown.push({ label: "Rehab work",         pts:  25 }); }
+  if (entry.rehab === false) { score -= 75;  breakdown.push({ label: "Rehab missed",        pts: -75 }); }
+
   return { score, breakdown };
+}
+
+function calcSoberStreakBonus(entries, date) {
+  // Count consecutive sober days ending on the given date (inclusive)
+  const sorted = Object.keys(entries).sort();
+  const idx    = sorted.indexOf(date);
+  if (idx < 0) return { bonus: 0, streak: 0 };
+  let streak = 0;
+  for (let i = idx; i >= 0; i--) {
+    if (entries[sorted[i]]?.sober) streak++;
+    else break;
+  }
+  const bonus = streak >= 30 ? 500 : streak >= 7 ? 100 : 0;
+  return { bonus, streak };
 }
 
 function calcWeeklyPenalty(weekEntries) {
@@ -143,10 +162,11 @@ function buildSeries(entries, weeklyPenalties) {
     const streakForToday = drinkStreak;
     const { score }      = calcDailyScore(entry, streakForToday);
     drinkStreak          = entry?.sober ? 0 : drinkStreak + 1;
-    cumulative          += score;
+    const { bonus: streakBonus, streak: soberStreak } = calcSoberStreakBonus(entries, date);
+    cumulative          += score + streakBonus;
     const wp             = weeklyPenalties?.[date] || 0;
     cumulative          += wp;
-    series.push({ date, score, cumulative, sober: entry?.sober, wp, drinkStreak: streakForToday });
+    series.push({ date, score, cumulative, sober: entry?.sober, wp, drinkStreak: streakForToday, streakBonus, soberStreak });
   }
   return series;
 }
@@ -170,6 +190,7 @@ const EMPTY_ENTRY = {
   breakfast: null, lunch: null, snacks: null, supps: null,
   grindstone: [], towers: 0,
   miles: "", poorSleep: false, junkFood: false,
+  rehab: null,
 };
 
 // ── Line chart component ──────────────────────────────────────────────────────
@@ -310,7 +331,7 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
       {/* Alcohol */}
       <div style={sectionTitle}>Alcohol</div>
       <div style={card}>
-        <div style={{ fontSize:10, color:"#aaa", marginBottom:8 }}>Sober: +100 pts &nbsp;|&nbsp; Day 1: -100 base -40/drink &nbsp;|&nbsp; Day 2: -400 base -80/drink &nbsp;|&nbsp; Day 3+: -900 base -150/drink</div>
+        <div style={{ fontSize:10, color:"#aaa", marginBottom:8 }}>Sober: +100 pts &nbsp;|&nbsp; Day 1: -50 first drink, -15 each add'l &nbsp;|&nbsp; Day 2: -75 / -30 &nbsp;|&nbsp; Day 3+: escalates</div>
         <div style={{ display:"flex", gap:6, marginBottom: form.sober === false ? 12 : 0 }}>
           <button style={checkBtn(form.sober===true,"green")} onClick={() => setForm(f=>({...f,sober:true,drinks:0}))}>✓ Sober</button>
           <button style={checkBtn(form.sober===false,"red")}  onClick={() => setForm(f=>({...f,sober:false}))}>✗ Drank</button>
@@ -419,6 +440,16 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
             </button>
           </div>
         ))}
+      </div>
+
+      {/* Rehab */}
+      <div style={sectionTitle}>Rehab</div>
+      <div style={card}>
+        <div style={{ fontSize:10, color:"#aaa", marginBottom:8 }}>Back or shoulder rehab &nbsp;|&nbsp; +25 done · -75 missed</div>
+        <div style={{ display:"flex", gap:6 }}>
+          <button style={checkBtn(form.rehab===true,"green")}  onClick={() => setForm(f=>({...f,rehab:true}))}>✓ Done</button>
+          <button style={checkBtn(form.rehab===false,"red")}   onClick={() => setForm(f=>({...f,rehab:false}))}>✗ Missed</button>
+        </div>
       </div>
 
       {/* Preview */}
@@ -834,6 +865,11 @@ export default function App() {
                     {wp && (
                       <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#c1121f", marginTop:4, paddingTop:4, borderTop:"1px solid #ebe8e3" }}>
                         <span>Weekly penalty</span><span>{wp}</span>
+                      </div>
+                    )}
+                    {s?.streakBonus > 0 && (
+                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#2d6a4f", marginTop:4, paddingTop:4, borderTop:"1px solid #ebe8e3" }}>
+                        <span>Sober streak bonus ({s.soberStreak} days) 🏆</span><span>+{s.streakBonus}</span>
                       </div>
                     )}
                   </div>
