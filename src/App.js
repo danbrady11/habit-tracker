@@ -94,10 +94,9 @@ function calcDailyScore(entry, drinkStreak) {
     }
   }
 
-  if (entry.towers) { 
-    const towerReps = parseInt(entry.towers) || 0;
-    const pts = towerReps * 2;
-    if (pts > 0) { score += pts; breakdown.push({ label: `Towers (${towerReps} reps)`, pts }); }
+  if (entry.run) {
+    score += 50;
+    breakdown.push({ label: "5K run", pts: 50 });
   }
 
   const miles = parseFloat(entry.miles) || 0;
@@ -109,9 +108,6 @@ function calcDailyScore(entry, drinkStreak) {
 
   if (entry.poorSleep) { score -= 150; breakdown.push({ label: "Sleep <6 hours",          pts: -150 }); }
   if (entry.junkFood)  { score -= 100; breakdown.push({ label: "Junk food / off-plan day", pts: -100 }); }
-
-  if (entry.rehab === true)  { score += 25;  breakdown.push({ label: "Rehab work",         pts:  25 }); }
-  if (entry.rehab === false) { score -= 75;  breakdown.push({ label: "Rehab missed",        pts: -75 }); }
 
   return { score, breakdown };
 }
@@ -134,21 +130,21 @@ function calcWeeklyPenalty(weekEntries) {
   const grindDone = new Set();
   for (const e of weekEntries) for (const g of (e?.grindstone || [])) grindDone.add(g);
   const grindCount = grindDone.size;
-  const towerReps  = weekEntries.reduce((sum, e) => sum + (parseInt(e?.towers) || 0), 0);
+  const runCount   = weekEntries.filter(e => e?.run).length;
 
   const grindPenalty = grindCount >= 5 ? 200  :
                        grindCount >= 3 ? 0    :
                        grindCount === 2 ? -100 :
                        grindCount === 1 ? -200 : -300;
 
-  const towerPenalty = towerReps >= 55 ? 100 : 0;
+  const runPenalty = runCount < 3 ? -150 : 0;
 
   const breakdown = [];
   if (grindPenalty > 0) breakdown.push({ label: `Grindstone bonus (${grindCount}/5 sessions) 🏆`, pts: grindPenalty });
   if (grindPenalty < 0) breakdown.push({ label: `Grindstone (${grindCount}/3 sessions)`,           pts: grindPenalty });
-  if (towerPenalty > 0) breakdown.push({ label: `Towers bonus (${towerReps}/55 reps) 🏆`,          pts: towerPenalty });
+  if (runPenalty   < 0) breakdown.push({ label: `5K plan (${runCount}/3 runs)`,                    pts: runPenalty  });
 
-  return { penalty: grindPenalty + towerPenalty, breakdown, grindCount, towerDays: towerReps, grindDone };
+  return { penalty: grindPenalty + runPenalty, breakdown, grindCount, runCount, grindDone };
 }
 
 function buildSeries(entries, weeklyPenalties) {
@@ -188,9 +184,8 @@ async function saveData(data) {
 const EMPTY_ENTRY = {
   sober: null, drinks: 0,
   breakfast: null, lunch: null, snacks: null, supps: null,
-  grindstone: [], towers: 0,
+  grindstone: [], run: false,
   miles: "", poorSleep: false, junkFood: false,
-  rehab: null,
 };
 
 // ── Line chart component ──────────────────────────────────────────────────────
@@ -400,13 +395,12 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
       <div style={card}>
         <div style={fieldStyle}>
           <div>
-            <div style={{ fontSize:13 }}>Towers</div>
-            <div style={{ fontSize:10, color:"#aaa" }}>+2 pts/rep · 40/week neutral · 55+/week bonus</div>
+            <div style={{ fontSize:13 }}>5K Run</div>
+            <div style={{ fontSize:10, color:"#aaa" }}>+50 pts · 3x/week required · -150 if fewer</div>
           </div>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <button onClick={() => setForm(f=>({...f,towers:Math.max(0,(f.towers||0)-1)}))} style={counterBtn}>−</button>
-            <span style={{ fontSize:20, minWidth:28, textAlign:"center" }}>{form.towers||0}</span>
-            <button onClick={() => setForm(f=>({...f,towers:(f.towers||0)+1}))} style={counterBtn}>+</button>
+          <div style={{ display:"flex", gap:6 }}>
+            <button style={smallCheck(form.run===true,"green")}  onClick={() => setForm(f=>({...f,run:true}))}>✓</button>
+            <button style={smallCheck(form.run===false,"red")}   onClick={() => setForm(f=>({...f,run:false}))}>✗</button>
           </div>
         </div>
         <div style={{ ...fieldStyle, borderBottom:"none" }}>
@@ -440,16 +434,6 @@ function EntryForm({ dateStr, initialEntry, weekData, todayStr, onSave, onCancel
             </button>
           </div>
         ))}
-      </div>
-
-      {/* Rehab */}
-      <div style={sectionTitle}>Rehab</div>
-      <div style={card}>
-        <div style={{ fontSize:10, color:"#aaa", marginBottom:8 }}>Back or shoulder rehab &nbsp;|&nbsp; +25 done · -75 missed</div>
-        <div style={{ display:"flex", gap:6 }}>
-          <button style={checkBtn(form.rehab===true,"green")}  onClick={() => setForm(f=>({...f,rehab:true}))}>✓ Done</button>
-          <button style={checkBtn(form.rehab===false,"red")}   onClick={() => setForm(f=>({...f,rehab:false}))}>✗ Missed</button>
-        </div>
       </div>
 
       {/* Preview */}
@@ -532,7 +516,7 @@ export default function App() {
   const weekStart   = getWeekStart(todayStr);
   const weekDates   = getWeekDates(weekStart);
   const weekEntries = weekDates.map(d => data.entries?.[d]).filter(Boolean);
-  const { grindCount, towerDays, grindDone } = calcWeeklyPenalty(weekEntries);
+  const { grindCount, runCount, grindDone } = calcWeeklyPenalty(weekEntries);
 
   async function handleSaveEntry(dateStr, form) {
     const updated = { ...data, entries: { ...data.entries, [dateStr]: { ...form } } };
@@ -567,9 +551,9 @@ export default function App() {
         </div>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           {[
-            { label:"GRINDSTONE", val:`${grindCount}/3`, ok: grindCount>=3 },
-            { label:"TOWERS",     val:`${towerDays} reps`,  ok: towerDays>=55  },
-            { label:"WEEK OF",    val:fmtShort(weekStart), ok:true },
+            { label:"GRINDSTONE", val:`${grindCount}/3`,   ok: grindCount>=3 },
+            { label:"5K RUNS",    val:`${runCount}/3`,     ok: runCount>=3   },
+            { label:"WEEK OF",    val:fmtShort(weekStart), ok: true          },
           ].map((s,i) => (
             <div key={i} style={{ background:"#f0ede8", padding:"5px 10px", fontSize:10, letterSpacing:1 }}>
               <span style={{ color:"#aaa" }}>{s.label} </span>
@@ -759,22 +743,22 @@ export default function App() {
           </div>
 
           <div style={card}>
-            <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>Towers Reps This Week</div>
+            <div style={{ fontSize:10, letterSpacing:2, color:"#aaa", textTransform:"uppercase", marginBottom:12 }}>5K Runs This Week</div>
             <div style={{ display:"flex", gap:5, marginBottom:12 }}>
               {weekDates.map((d,i) => {
-                const reps    = parseInt(data.entries?.[d]?.towers) || 0;
+                const ran     = !!data.entries?.[d]?.run;
                 const dayName = new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"});
                 return (
-                  <div key={i} style={{ flex:1, padding:"8px 4px", textAlign:"center", border:`1px solid ${reps>0?"#2d6a4f":"#ddd"}`, background:reps>0?"#f0f7f4":d>todayStr?"#f8f6f2":"#fff", fontSize:9, color:reps>0?"#2d6a4f":"#aaa" }}>
-                    {dayName}<br/>{reps>0?reps:d>todayStr?"·":"—"}
+                  <div key={i} style={{ flex:1, padding:"8px 4px", textAlign:"center", border:`1px solid ${ran?"#2d6a4f":"#ddd"}`, background:ran?"#f0f7f4":d>todayStr?"#f8f6f2":"#fff", fontSize:9, color:ran?"#2d6a4f":"#aaa" }}>
+                    {dayName}<br/>{ran?"✓":d>todayStr?"·":"—"}
                   </div>
                 );
               })}
             </div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
-              <span style={{ color:"#aaa" }}>{towerDays} reps this week</span>
-              <span style={{ color: towerDays>=55?"#2d6a4f":"#aaa" }}>
-                {towerDays>=55?"Bonus +100 🏆": towerDays>=40?`${55-towerDays} more for bonus`:`${55-towerDays} more for bonus`}
+              <span style={{ color:"#aaa" }}>{runCount} of 3 runs</span>
+              <span style={{ color: runCount>=3?"#2d6a4f":"#c1121f" }}>
+                {runCount>=3?"On track ✓":`${3-runCount} more needed · -150 penalty`}
               </span>
             </div>
           </div>
